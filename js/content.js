@@ -6,6 +6,7 @@ let stream = null;
 
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  console.log("Content script received message:", request);
   if (request.action === "startRecording") {
     startRecording(request.streamId, request.tabId);
     sendResponse({success: true});

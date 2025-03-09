@@ -47,27 +47,52 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Start recording when the start button is clicked
   startButton.addEventListener('click', function() {
-    // First check if we're on a chrome:// URL
+    // Get the current active tab
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
       const tab = tabs[0];
       
+      // Only check for chrome:// URLs if the URL is available
+      // Some URLs might not be available due to permissions
       if (tab.url && tab.url.startsWith('chrome://')) {
         statusDiv.textContent = "Cannot record chrome:// pages due to security restrictions. Please navigate to a regular webpage to use the screen recorder.";
         return;
       }
       
-      // Get the media stream ID for the current tab
-      chrome.tabCapture.getMediaStreamId({ consumerTabId: tab.id }, function(streamId) {
+      // First inject the content script to ensure it's available
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['js/content.js']
+      }, function() {
         if (chrome.runtime.lastError) {
-          statusDiv.textContent = "Failed to start recording: " + chrome.runtime.lastError.message;
+          statusDiv.textContent = "Failed to inject content script: " + chrome.runtime.lastError.message;
           return;
         }
         
-        // Send the stream ID to the content script to start recording
-        chrome.tabs.sendMessage(tab.id, { 
-          action: "startRecording", 
-          streamId: streamId,
-          tabId: tab.id
+        // Get the media stream ID for the current tab
+        chrome.tabCapture.getMediaStreamId({ consumerTabId: tab.id }, function(streamId) {
+          if (chrome.runtime.lastError) {
+            statusDiv.textContent = "Failed to start recording: " + chrome.runtime.lastError.message;
+            return;
+          }
+          
+          // Send the stream ID to the content script to start recording
+          chrome.tabs.sendMessage(tab.id, { 
+            action: "startRecording", 
+            streamId: streamId,
+            tabId: tab.id
+          }, function(response) {
+            if (chrome.runtime.lastError) {
+              statusDiv.textContent = "Failed to communicate with page: " + chrome.runtime.lastError.message;
+              return;
+            }
+            
+            if (!response) {
+              statusDiv.textContent = "No response from content script. Please refresh the page and try again.";
+              return;
+            }
+            
+            // Response handled by message listener
+          });
         });
       });
     });
@@ -77,7 +102,27 @@ document.addEventListener('DOMContentLoaded', function() {
   stopButton.addEventListener('click', function() {
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
       const tab = tabs[0];
-      chrome.tabs.sendMessage(tab.id, { action: "stopRecording" });
+      
+      // First ensure the content script is injected
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['js/content.js']
+      }, function() {
+        if (chrome.runtime.lastError) {
+          statusDiv.textContent = "Failed to inject content script: " + chrome.runtime.lastError.message;
+          return;
+        }
+        
+        // Send stop message to content script
+        chrome.tabs.sendMessage(tab.id, { action: "stopRecording" }, function(response) {
+          if (chrome.runtime.lastError) {
+            statusDiv.textContent = "Failed to communicate with page: " + chrome.runtime.lastError.message;
+            return;
+          }
+          
+          // Response handled by message listener
+        });
+      });
     });
   });
   

@@ -25,10 +25,10 @@
   "background": {
     "service_worker": "js/background.js"
   },
-  "content_scripts": [
+  "web_accessible_resources": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["js/content.js"]
+      "resources": ["js/content.js"],
+      "matches": ["<all_urls>"]
     }
   ]
 }
