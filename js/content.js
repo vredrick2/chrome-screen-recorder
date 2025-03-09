@@ -1,8 +1,23 @@
 // content.js - Content script that runs in the context of web pages
 
-let mediaRecorder = null;
-let recordedChunks = [];
-let stream = null;
+// Use a self-executing function to avoid variable redeclaration issues
+// when the script is injected multiple times
+(function() {
+// Check if the script has already been injected
+if (window.chromeTabRecorderInitialized) {
+  console.log("Chrome Tab Recorder already initialized");
+  return;
+}
+
+// Mark as initialized
+window.chromeTabRecorderInitialized = true;
+
+// Use window properties to store state
+window.chromeTabRecorder = window.chromeTabRecorder || {
+  mediaRecorder: null,
+  recordedChunks: [],
+  stream: null
+};
 
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
@@ -43,7 +58,7 @@ async function startRecording(streamId, tabId) {
     };
     
     // Get the media stream
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    window.chromeTabRecorder.stream = await navigator.mediaDevices.getUserMedia(constraints);
     
     // Notify popup that recording has started
     chrome.runtime.sendMessage({action: "recordingStarted"});
@@ -55,24 +70,24 @@ async function startRecording(streamId, tabId) {
     };
     
     try {
-      mediaRecorder = new MediaRecorder(stream, options);
+      window.chromeTabRecorder.mediaRecorder = new MediaRecorder(window.chromeTabRecorder.stream, options);
     } catch (e) {
       // Fallback if the specified options aren't supported
       console.warn("MediaRecorder with specified options not supported, using default options");
-      mediaRecorder = new MediaRecorder(stream);
+      window.chromeTabRecorder.mediaRecorder = new MediaRecorder(window.chromeTabRecorder.stream);
     }
     
-    recordedChunks = [];
+    window.chromeTabRecorder.recordedChunks = [];
     
-    mediaRecorder.ondataavailable = (e) => {
+    window.chromeTabRecorder.mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        recordedChunks.push(e.data);
+        window.chromeTabRecorder.recordedChunks.push(e.data);
       }
     };
     
-    mediaRecorder.onstop = () => {
+    window.chromeTabRecorder.mediaRecorder.onstop = () => {
       // Create a blob from the recorded chunks
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const blob = new Blob(window.chromeTabRecorder.recordedChunks, { type: 'video/webm' });
       
       // Get the tab title to use in the filename
       chrome.tabs.get(tabId, (tab) => {
@@ -101,11 +116,11 @@ async function startRecording(streamId, tabId) {
     };
     
     // Start recording with timeslices to get data during recording
-    mediaRecorder.start(1000); // Collect data every second
+    window.chromeTabRecorder.mediaRecorder.start(1000); // Collect data every second
     
     // Continue to play the captured audio to the user
     const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(stream);
+    const source = audioContext.createMediaStreamSource(window.chromeTabRecorder.stream);
     source.connect(audioContext.destination);
     
   } catch (error) {
@@ -116,24 +131,24 @@ async function startRecording(streamId, tabId) {
     });
     
     // Clean up any resources
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+    if (window.chromeTabRecorder.stream) {
+      window.chromeTabRecorder.stream.getTracks().forEach(track => track.stop());
     }
   }
 }
 
 // Function to stop recording
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+  if (window.chromeTabRecorder.mediaRecorder && window.chromeTabRecorder.mediaRecorder.state !== 'inactive') {
+    window.chromeTabRecorder.mediaRecorder.stop();
     
     // Stop all tracks in the stream
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+    if (window.chromeTabRecorder.stream) {
+      window.chromeTabRecorder.stream.getTracks().forEach(track => track.stop());
     }
     
     // Reset variables
-    stream = null;
+    window.chromeTabRecorder.stream = null;
   } else {
     chrome.runtime.sendMessage({
       action: "recordingError",
@@ -141,3 +156,6 @@ function stopRecording() {
     });
   }
 }
+
+// Close the self-executing function
+})();
