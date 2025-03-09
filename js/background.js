@@ -29,6 +29,16 @@ async function startRecording(sendResponse) {
     // Get the current active tab
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const tab = tabs[0];
+    
+    // Check if the tab URL is a chrome:// URL
+    if (tab.url && tab.url.startsWith('chrome://')) {
+      sendResponse({ 
+        success: false, 
+        error: "Cannot record chrome:// pages due to security restrictions. Please navigate to a regular webpage to use the screen recorder."
+      });
+      return;
+    }
+    
     recordingTab = tab.id;
     
     // Execute content script to capture the tab
@@ -69,7 +79,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       }
     }, (stream) => {
       if (chrome.runtime.lastError) {
-        console.error(chrome.runtime.lastError);
+        console.error("TabCapture error:", chrome.runtime.lastError);
+        // Notify popup about the error
+        chrome.runtime.sendMessage({
+          action: "recordingError",
+          error: chrome.runtime.lastError.message
+        });
         return;
       }
       

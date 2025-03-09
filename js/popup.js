@@ -6,6 +6,22 @@ document.addEventListener('DOMContentLoaded', function() {
   const statusDiv = document.getElementById('status');
   let recordingTimer = null;
   
+  // Listen for error messages from the background script
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === "recordingError") {
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      statusDiv.textContent = "Recording error: " + message.error;
+      statusDiv.classList.remove('recording');
+      
+      // Clear the timer if it exists
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
+    }
+  });
+  
   // Start recording when the start button is clicked
   startButton.addEventListener('click', function() {
     chrome.runtime.sendMessage({action: "startRecording"}, function(response) {

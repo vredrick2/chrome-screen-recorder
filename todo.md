@@ -12,7 +12,7 @@
 - [x] Implement screen recording functionality with local saving
 - [x] Test extension in browser
 - [x] Create GitHub repository
-- [ ] Push extension code to GitHub
+- [x] Push extension code to GitHub
 - [x] Package the extension
-- [ ] Create documentation
-- [ ] Deliver final files
+- [x] Create documentation
+- [x] Deliver final files
