@@ -29,18 +29,32 @@
       margin-top: 10px;
       padding: 5px;
       text-align: center;
+      border-radius: 4px;
+      background-color: #f1f1f1;
     }
     .recording {
       color: red;
       font-weight: bold;
+    }
+    .error {
+      color: red;
+      background-color: #ffeeee;
+    }
+    .info {
+      margin-top: 15px;
+      font-size: 12px;
+      color: #666;
     }
   </style>
 </head>
 <body>
   <h2>Chrome Tab Screen Recorder</h2>
   <button id="startRecording">Start Recording</button>
-  <button id="stopRecording" disabled>Stop Recording</button>
+  <button id="stopRecording">Stop Recording</button>
   <div class="status" id="status">Ready to record</div>
+  <div class="info">
+    Note: Cannot record chrome:// pages due to security restrictions.
+  </div>
   <script src="js/popup.js"></script>
 </body>
 </html>

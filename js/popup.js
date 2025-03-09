@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const statusDiv = document.getElementById('status');
   let recordingTimer = null;
   
-  // Listen for error messages from the background script
+  // Listen for error messages from the content script
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === "recordingError") {
       startButton.disabled = false;
@@ -19,71 +19,73 @@ document.addEventListener('DOMContentLoaded', function() {
         clearInterval(recordingTimer);
         recordingTimer = null;
       }
+    } else if (message.action === "recordingStarted") {
+      startButton.disabled = true;
+      stopButton.disabled = false;
+      statusDiv.textContent = "Recording... (0s)";
+      statusDiv.classList.add('recording');
+      
+      // Start timer to update recording duration
+      let seconds = 0;
+      recordingTimer = setInterval(() => {
+        seconds++;
+        statusDiv.textContent = `Recording... (${seconds}s)`;
+      }, 1000);
+    } else if (message.action === "recordingStopped") {
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      statusDiv.textContent = "Recording saved";
+      statusDiv.classList.remove('recording');
+      
+      // Clear the timer
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
     }
   });
   
   // Start recording when the start button is clicked
   startButton.addEventListener('click', function() {
-    chrome.runtime.sendMessage({action: "startRecording"}, function(response) {
-      if (response && response.success) {
-        startButton.disabled = true;
-        stopButton.disabled = false;
-        statusDiv.textContent = "Recording... (0s)";
-        statusDiv.classList.add('recording');
-        
-        // Start timer to update recording duration
-        let seconds = 0;
-        recordingTimer = setInterval(() => {
-          seconds++;
-          statusDiv.textContent = `Recording... (${seconds}s)`;
-        }, 1000);
-      } else {
-        statusDiv.textContent = "Failed to start recording: " + (response ? response.error : "Unknown error");
+    // First check if we're on a chrome:// URL
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      const tab = tabs[0];
+      
+      if (tab.url && tab.url.startsWith('chrome://')) {
+        statusDiv.textContent = "Cannot record chrome:// pages due to security restrictions. Please navigate to a regular webpage to use the screen recorder.";
+        return;
       }
+      
+      // Get the media stream ID for the current tab
+      chrome.tabCapture.getMediaStreamId({ consumerTabId: tab.id }, function(streamId) {
+        if (chrome.runtime.lastError) {
+          statusDiv.textContent = "Failed to start recording: " + chrome.runtime.lastError.message;
+          return;
+        }
+        
+        // Send the stream ID to the content script to start recording
+        chrome.tabs.sendMessage(tab.id, { 
+          action: "startRecording", 
+          streamId: streamId,
+          tabId: tab.id
+        });
+      });
     });
   });
   
   // Stop recording when the stop button is clicked
   stopButton.addEventListener('click', function() {
-    chrome.runtime.sendMessage({action: "stopRecording"}, function(response) {
-      if (response && response.success) {
-        startButton.disabled = false;
-        stopButton.disabled = true;
-        statusDiv.textContent = "Recording saved";
-        statusDiv.classList.remove('recording');
-        
-        // Clear the timer
-        if (recordingTimer) {
-          clearInterval(recordingTimer);
-          recordingTimer = null;
-        }
-      } else {
-        statusDiv.textContent = "Failed to stop recording: " + (response ? response.error : "Unknown error");
-      }
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      const tab = tabs[0];
+      chrome.tabs.sendMessage(tab.id, { action: "stopRecording" });
     });
   });
   
-  // Check current recording status when popup opens
-  chrome.runtime.sendMessage({action: "getRecordingStatus"}, function(response) {
-    if (response && response.isRecording) {
-      startButton.disabled = true;
-      stopButton.disabled = false;
-      statusDiv.textContent = `Recording... (${response.duration}s)`;
-      statusDiv.classList.add('recording');
-      
-      // Start timer to update recording duration
-      let seconds = response.duration || 0;
-      recordingTimer = setInterval(() => {
-        seconds++;
-        statusDiv.textContent = `Recording... (${seconds}s)`;
-      }, 1000);
-    } else {
-      startButton.disabled = false;
-      stopButton.disabled = true;
-      statusDiv.textContent = "Ready to record";
-      statusDiv.classList.remove('recording');
-    }
-  });
+  // Initialize UI state
+  startButton.disabled = false;
+  stopButton.disabled = true;
+  statusDiv.textContent = "Ready to record";
+  statusDiv.classList.remove('recording');
   
   // Clean up timer when popup closes
   window.addEventListener('unload', function() {
