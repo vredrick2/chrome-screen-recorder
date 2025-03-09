@@ -16,19 +16,46 @@ window.chromeTabRecorderInitialized = true;
 window.chromeTabRecorder = window.chromeTabRecorder || {
   mediaRecorder: null,
   recordedChunks: [],
-  stream: null
+  stream: null,
+  isRecording: false
 };
 
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   console.log("Content script received message:", request);
   if (request.action === "startRecording") {
-    startRecording(request.streamId, request.tabId);
-    sendResponse({success: true});
+    // Check if already recording
+    if (window.chromeTabRecorder.isRecording) {
+      console.log("Already recording, cannot start another recording");
+      sendResponse({
+        success: false, 
+        error: "Already recording. Stop the current recording before starting a new one."
+      });
+      return true;
+    }
+    
+    startRecording(request.streamId, request.tabId)
+      .then(() => {
+        sendResponse({success: true});
+      })
+      .catch(error => {
+        sendResponse({
+          success: false, 
+          error: error.message || "Failed to start recording"
+        });
+      });
     return true;
   } else if (request.action === "stopRecording") {
-    stopRecording();
-    sendResponse({success: true});
+    const result = stopRecording();
+    sendResponse({
+      success: true,
+      wasRecording: result.wasRecording
+    });
+    return true;
+  } else if (request.action === "getRecordingStatus") {
+    sendResponse({
+      isRecording: window.chromeTabRecorder.isRecording
+    });
     return true;
   }
   return false;
@@ -59,6 +86,7 @@ async function startRecording(streamId, tabId) {
     
     // Get the media stream
     window.chromeTabRecorder.stream = await navigator.mediaDevices.getUserMedia(constraints);
+    window.chromeTabRecorder.isRecording = true;
     
     // Notify popup that recording has started
     chrome.runtime.sendMessage({action: "recordingStarted"});
@@ -86,33 +114,47 @@ async function startRecording(streamId, tabId) {
     };
     
     window.chromeTabRecorder.mediaRecorder.onstop = () => {
-      // Create a blob from the recorded chunks
-      const blob = new Blob(window.chromeTabRecorder.recordedChunks, { type: 'video/webm' });
-      
-      // Get the tab title to use in the filename
-      chrome.tabs.get(tabId, (tab) => {
-        // Create a sanitized filename from the tab title
-        let filename = tab.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        if (filename.length > 50) filename = filename.substring(0, 50);
+      // Only process if we have chunks to work with
+      if (window.chromeTabRecorder.recordedChunks.length > 0) {
+        // Create a blob from the recorded chunks
+        const blob = new Blob(window.chromeTabRecorder.recordedChunks, { type: 'video/webm' });
         
-        // Create a download link for the recording
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = `${filename}-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        
-        // Clean up
-        setTimeout(() => {
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
-        }, 100);
-        
-        // Notify popup that recording has stopped
+        // Get the tab title to use in the filename
+        chrome.tabs.get(tabId, (tab) => {
+          try {
+            // Create a sanitized filename from the tab title
+            let filename = tab.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            if (filename.length > 50) filename = filename.substring(0, 50);
+            
+            // Create a download link for the recording
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `${filename}-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            
+            // Clean up
+            setTimeout(() => {
+              document.body.removeChild(a);
+              window.URL.revokeObjectURL(url);
+            }, 100);
+          } catch (error) {
+            console.error("Error saving recording:", error);
+          }
+          
+          // Reset recording state
+          window.chromeTabRecorder.isRecording = false;
+          
+          // Notify popup that recording has stopped
+          chrome.runtime.sendMessage({action: "recordingStopped"});
+        });
+      } else {
+        // No chunks recorded, just reset state
+        window.chromeTabRecorder.isRecording = false;
         chrome.runtime.sendMessage({action: "recordingStopped"});
-      });
+      }
     };
     
     // Start recording with timeslices to get data during recording
@@ -125,6 +167,7 @@ async function startRecording(streamId, tabId) {
     
   } catch (error) {
     console.error("Error starting recording:", error);
+    window.chromeTabRecorder.isRecording = false;
     chrome.runtime.sendMessage({
       action: "recordingError",
       error: error.message || "Unknown error occurred while starting recording"
@@ -134,27 +177,45 @@ async function startRecording(streamId, tabId) {
     if (window.chromeTabRecorder.stream) {
       window.chromeTabRecorder.stream.getTracks().forEach(track => track.stop());
     }
+    
+    // Re-throw the error for proper promise handling
+    throw error;
   }
 }
 
 // Function to stop recording
 function stopRecording() {
-  if (window.chromeTabRecorder.mediaRecorder && window.chromeTabRecorder.mediaRecorder.state !== 'inactive') {
-    window.chromeTabRecorder.mediaRecorder.stop();
-    
-    // Stop all tracks in the stream
-    if (window.chromeTabRecorder.stream) {
-      window.chromeTabRecorder.stream.getTracks().forEach(track => track.stop());
+  let wasRecording = false;
+  
+  try {
+    if (window.chromeTabRecorder.mediaRecorder && window.chromeTabRecorder.mediaRecorder.state !== 'inactive') {
+      wasRecording = true;
+      window.chromeTabRecorder.mediaRecorder.stop();
+      
+      // Stop all tracks in the stream
+      if (window.chromeTabRecorder.stream) {
+        window.chromeTabRecorder.stream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Reset stream variable
+      window.chromeTabRecorder.stream = null;
+    } else {
+      // Not recording or already stopped
+      window.chromeTabRecorder.isRecording = false;
+      chrome.runtime.sendMessage({
+        action: "recordingStopped"
+      });
     }
-    
-    // Reset variables
-    window.chromeTabRecorder.stream = null;
-  } else {
+  } catch (error) {
+    console.error("Error stopping recording:", error);
+    // Force reset recording state in case of errors
+    window.chromeTabRecorder.isRecording = false;
     chrome.runtime.sendMessage({
-      action: "recordingError",
-      error: "No active recording found"
+      action: "recordingStopped"
     });
   }
+  
+  return { wasRecording };
 }
 
 // Close the self-executing function
